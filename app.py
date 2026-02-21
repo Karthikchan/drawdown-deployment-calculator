@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import uuid
+import matplotlib.pyplot as plt
 
 # -------------------------------------------------
 # Page Configuration
@@ -32,18 +33,10 @@ def send_ga_event():
     payload = {
         "client_id": client_id,
         "events": [
-            {
-                "name": "session_start",
-                "params": {
-                    "session_id": session_id
-                }
-            },
+            {"name": "session_start", "params": {"session_id": session_id}},
             {
                 "name": "page_view",
-                "params": {
-                    "session_id": session_id,
-                    "engagement_time_msec": 100
-                }
+                "params": {"session_id": session_id, "engagement_time_msec": 100}
             }
         ]
     }
@@ -54,7 +47,6 @@ def send_ga_event():
         pass
 
 
-# Fire once per session
 if GA_MEASUREMENT_ID and GA_API_SECRET:
     if "ga_sent" not in st.session_state:
         send_ga_event()
@@ -65,7 +57,7 @@ if GA_MEASUREMENT_ID and GA_API_SECRET:
 # -------------------------------------------------
 
 st.title("Drawdown Deployment Calculator")
-st.write("Structured capital deployment framework for disciplined equity investing.")
+st.write("Rule-based capital deployment engine with equity cap discipline.")
 
 # -------------------------------------------------
 # Sidebar Inputs
@@ -104,81 +96,187 @@ weighting_mode = st.sidebar.selectbox(
     ["Equal Allocation", "Progressively Aggressive"]
 )
 
+compare_mode = st.sidebar.checkbox("Compare Both Modes")
+
 # -------------------------------------------------
-# Core Calculations
+# Risk Diagnostics
+# -------------------------------------------------
+
+st.sidebar.markdown("---")
+st.sidebar.header("Risk Diagnostics")
+
+if total_portfolio == 0:
+    st.error("Total portfolio cannot be zero.")
+    st.stop()
+
+current_equity_pct = (current_equity / total_portfolio) * 100
+st.sidebar.write(f"Current Equity Allocation: {current_equity_pct:.2f}%")
+
+if current_equity_pct > target_max_equity_pct:
+    st.sidebar.error("Already above target max allocation.")
+
+# -------------------------------------------------
+# Parse Drawdowns Safely
+# -------------------------------------------------
+
+try:
+    raw_levels = [x.strip() for x in drawdown_levels.split(",")]
+    levels = sorted(
+        list({abs(float(x)) for x in raw_levels if x != ""})
+    )
+except:
+    st.error("Invalid drawdown format. Use comma-separated values like -5,-10,-15")
+    st.stop()
+
+if len(levels) == 0:
+    st.warning("Please enter valid drawdown levels.")
+    st.stop()
+
+# -------------------------------------------------
+# Core Capital Calculations
 # -------------------------------------------------
 
 cash_available = total_portfolio - current_equity
 max_equity_value_allowed = (target_max_equity_pct / 100) * total_portfolio
 max_deployable = max_equity_value_allowed - current_equity
+deployable_cash = min(cash_available, max(max_deployable, 0))
 
-levels = [float(x.strip()) for x in drawdown_levels.split(",") if x.strip() != ""]
-num_stages = len(levels)
 
 # -------------------------------------------------
-# Deployment Logic
+# Deployment Function
+# -------------------------------------------------
+
+def generate_plan(mode):
+    num_stages = len(levels)
+
+    if mode == "Equal Allocation":
+        weights = [1] * num_stages
+    else:
+        weights = list(range(1, num_stages + 1))
+
+    total_weight = sum(weights)
+
+    equity_value = current_equity
+    remaining_cash = cash_available
+    deployed_so_far = 0
+
+    rows = []
+
+    for i in range(num_stages):
+        planned = deployable_cash * (weights[i] / total_weight)
+
+        if deployed_so_far + planned > deployable_cash:
+            planned = deployable_cash - deployed_so_far
+
+        deploy_amount = max(planned, 0)
+
+        equity_value += deploy_amount
+        remaining_cash -= deploy_amount
+        deployed_so_far += deploy_amount
+
+        equity_pct = (equity_value / total_portfolio) * 100
+
+        rows.append({
+            "Drawdown Level (%)": -levels[i],
+            "Deploy Amount (₹)": round(deploy_amount, 2),
+            "Equity After Deployment (₹)": round(equity_value, 2),
+            "Remaining Cash (₹)": round(remaining_cash, 2),
+            "Equity Allocation (%)": round(equity_pct, 2)
+        })
+
+    return pd.DataFrame(rows)
+
+
+# -------------------------------------------------
+# Execution
 # -------------------------------------------------
 
 if cash_available <= 0:
     st.warning("No cash available for deployment.")
-
-elif num_stages == 0:
-    st.warning("Please enter valid drawdown levels.")
-
+elif deployable_cash <= 0:
+    st.warning("Deployment capped. Already at target allocation.")
 else:
-    deployable_cash = min(cash_available, max_deployable)
 
-    if deployable_cash <= 0:
-        st.warning("Already at or above target equity allocation.")
+    st.subheader("Deployment Plan")
 
-    else:
-        if weighting_mode == "Equal Allocation":
-            weights = [1] * num_stages
-        else:
-            weights = list(range(1, num_stages + 1))
+    if compare_mode:
 
-        total_weight = sum(weights)
+        df_equal = generate_plan("Equal Allocation")
+        df_aggressive = generate_plan("Progressively Aggressive")
 
-        deployment_plan = []
-        remaining_cash = cash_available
-        equity_value = current_equity
-        deployed_so_far = 0
+        col1, col2 = st.columns(2)
 
-        for i in range(num_stages):
+        with col1:
+            st.write("Equal Allocation")
+            st.dataframe(df_equal, use_container_width=True)
 
-            planned_deploy = deployable_cash * (weights[i] / total_weight)
+        with col2:
+            st.write("Progressively Aggressive")
+            st.dataframe(df_aggressive, use_container_width=True)
 
-            if deployed_so_far + planned_deploy > deployable_cash:
-                planned_deploy = deployable_cash - deployed_so_far
+        # Plot Comparison
+        st.subheader("Equity Allocation Comparison")
 
-            deploy_amount = max(planned_deploy, 0)
+        fig, ax = plt.subplots()
 
-            equity_value += deploy_amount
-            remaining_cash -= deploy_amount
-            deployed_so_far += deploy_amount
-
-            equity_pct = (equity_value / total_portfolio) * 100
-
-            deployment_plan.append({
-                "Drawdown Level (%)": levels[i],
-                "Deploy Amount (₹)": round(deploy_amount, 2),
-                "Equity After Deployment (₹)": round(equity_value, 2),
-                "Remaining Cash (₹)": round(remaining_cash, 2),
-                "Equity Allocation (%)": round(equity_pct, 2)
-            })
-
-        df = pd.DataFrame(deployment_plan)
-
-        # Output
-        st.subheader("Deployment Plan")
-        st.dataframe(df, use_container_width=True)
-
-        st.subheader("Summary")
-        st.write(f"Cash Available: ₹{cash_available:,.2f}")
-        st.write(f"Max Deployable (Capped): ₹{deployable_cash:,.2f}")
-        st.write(
-            f"Final Equity Allocation if Fully Deployed: "
-            f"{df.iloc[-1]['Equity Allocation (%)']}%"
+        ax.plot(
+            df_equal["Drawdown Level (%)"],
+            df_equal["Equity Allocation (%)"],
+            marker='o',
+            label="Equal"
         )
 
-        st.success("Deployment capped at target maximum equity allocation.")
+        ax.plot(
+            df_aggressive["Drawdown Level (%)"],
+            df_aggressive["Equity Allocation (%)"],
+            marker='o',
+            label="Aggressive"
+        )
+
+        ax.set_xlabel("Market Drawdown (%)")
+        ax.set_ylabel("Equity Allocation (%)")
+        ax.grid(True)
+        ax.legend()
+
+        st.pyplot(fig)
+
+    else:
+
+        df = generate_plan(weighting_mode)
+
+        st.dataframe(df, use_container_width=True)
+
+        # Allocation Curve
+        st.subheader("Equity Allocation Path")
+
+        fig, ax = plt.subplots()
+
+        ax.plot(
+            df["Drawdown Level (%)"],
+            df["Equity Allocation (%)"],
+            marker='o'
+        )
+
+        ax.set_xlabel("Market Drawdown (%)")
+        ax.set_ylabel("Equity Allocation (%)")
+        ax.grid(True)
+
+        st.pyplot(fig)
+
+        # Professional Summary Metrics
+        st.subheader("Capital Summary")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Cash Available", f"₹{cash_available:,.0f}")
+            st.metric("Max Deployable", f"₹{deployable_cash:,.0f}")
+
+        with col2:
+            final_pct = df.iloc[-1]["Equity Allocation (%)"]
+            st.metric("Final Equity Allocation", f"{final_pct}%")
+
+        if deployable_cash < cash_available:
+            st.info("Deployment capped at target maximum equity allocation.")
+
+        st.success("Rule-based deployment plan generated successfully.")
