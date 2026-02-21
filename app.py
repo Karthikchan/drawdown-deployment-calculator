@@ -209,15 +209,14 @@ def crash_equity_and_cash_at_bottom(
 
 df = generate_plan(deployment_mode) if deployable > 0 else None
 
-def crash_equity_and_cash_at_bottom(mode, crash_drop):
-    n = len(levels)
-    weights = get_weights(mode, n)
-    total_weight = sum(weights)
+# -------------------------------------------------
+# Tabs
+# -------------------------------------------------
 
 tab1, tab2, tab3 = st.tabs(["Deployment Plan", "Crash Replay", "Risk Diagnostics"])
 
 # -------------------------------------------------
-# Sections
+# TAB 1
 # -------------------------------------------------
 
 with tab1:
