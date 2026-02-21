@@ -1,19 +1,17 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
 import uuid
 
 # -------------------------------------------------
-# Page Configuration
+# Page Setup
 # -------------------------------------------------
 
-st.set_page_config(
-    page_title="Drawdown Deployment Calculator",
-    layout="wide"
-)
+st.set_page_config(page_title="Capital Deployment Engine", layout="wide")
 
 # -------------------------------------------------
-# Server-Side Google Analytics Tracking
+# Analytics
 # -------------------------------------------------
 
 GA_MEASUREMENT_ID = st.secrets.get("GA_MEASUREMENT_ID")
@@ -21,33 +19,19 @@ GA_API_SECRET = st.secrets.get("GA_API_SECRET")
 
 def send_ga_event():
     client_id = str(uuid.uuid4())
-    session_id = str(uuid.uuid4())
-
     url = (
         f"https://www.google-analytics.com/mp/collect"
         f"?measurement_id={GA_MEASUREMENT_ID}"
         f"&api_secret={GA_API_SECRET}"
     )
-
     payload = {
         "client_id": client_id,
-        "events": [
-            {"name": "session_start", "params": {"session_id": session_id}},
-            {
-                "name": "page_view",
-                "params": {
-                    "session_id": session_id,
-                    "engagement_time_msec": 100
-                }
-            }
-        ]
+        "events": [{"name": "page_view"}]
     }
-
     try:
         requests.post(url, json=payload, timeout=2)
     except:
         pass
-
 
 if GA_MEASUREMENT_ID and GA_API_SECRET:
     if "ga_sent" not in st.session_state:
@@ -58,8 +42,8 @@ if GA_MEASUREMENT_ID and GA_API_SECRET:
 # Title
 # -------------------------------------------------
 
-st.title("Drawdown Deployment Calculator")
-st.write("Rule-based capital deployment engine with equity cap discipline.")
+st.title("Capital Deployment Engine")
+st.write("Systematic allocation model with equity cap, crash replay and probabilistic projection.")
 
 # -------------------------------------------------
 # Sidebar Inputs
@@ -67,191 +51,163 @@ st.write("Rule-based capital deployment engine with equity cap discipline.")
 
 st.sidebar.header("Portfolio Inputs")
 
-total_portfolio = st.sidebar.number_input(
-    "Total Portfolio Value (₹)",
-    min_value=0.0,
-    value=1000000.0,
-    step=10000.0
-)
+total_portfolio = st.sidebar.number_input("Total Portfolio (₹)", 0.0, 1e12, 1000000.0)
+current_equity = st.sidebar.number_input("Current Equity (₹)", 0.0, 1e12, 700000.0)
+target_max_equity_pct = st.sidebar.slider("Max Equity Allocation (%)", 0, 100, 85)
 
-current_equity = st.sidebar.number_input(
-    "Current Equity Value (₹)",
-    min_value=0.0,
-    value=700000.0,
-    step=10000.0
-)
+drawdown_levels = st.sidebar.text_input("- Drawdown Levels (%)", "-5,-10,-15,-20,-30")
+mode = st.sidebar.selectbox("Deployment Mode", ["Equal Allocation", "Progressively Aggressive"])
 
-target_max_equity_pct = st.sidebar.slider(
-    "Target Maximum Equity Allocation (%)",
-    min_value=0,
-    max_value=100,
-    value=85
-)
+# Crash Replay
+st.sidebar.markdown("---")
+st.sidebar.header("Historical Crash Replay")
 
-drawdown_levels = st.sidebar.text_input(
-    "Drawdown Levels (%) - comma separated",
-    "-5,-10,-15,-20,-30"
-)
+use_crash_replay = st.sidebar.checkbox("Replay Crash Path")
+crash_type = st.sidebar.selectbox("Crash Type", ["2008-Style (Deep)", "2020-Style (Sharp)"])
 
-weighting_mode = st.sidebar.selectbox(
-    "Deployment Mode",
-    ["Equal Allocation", "Progressively Aggressive"]
-)
+# Monte Carlo
+st.sidebar.markdown("---")
+st.sidebar.header("Monte Carlo Projection")
+use_monte_carlo = st.sidebar.checkbox("Run Monte Carlo")
 
-compare_mode = st.sidebar.checkbox("Compare Both Modes")
+if use_monte_carlo:
+    simulations = st.sidebar.slider("Simulations", 500, 5000, 2000)
+    exp_return = st.sidebar.slider("Expected Annual Return (%)", 5, 20, 12)
+    volatility = st.sidebar.slider("Annual Volatility (%)", 5, 40, 18)
+    years = st.sidebar.slider("Projection Years", 1, 15, 5)
 
 # -------------------------------------------------
 # Validation
 # -------------------------------------------------
 
 if total_portfolio == 0:
-    st.error("Total portfolio cannot be zero.")
     st.stop()
 
 try:
-    raw_levels = [x.strip() for x in drawdown_levels.split(",")]
-    levels = sorted(list({abs(float(x)) for x in raw_levels if x != ""}))
+    raw = [x.strip() for x in drawdown_levels.split(",")]
+    levels = sorted(list({abs(float(x)) for x in raw if x != ""}))
 except:
-    st.error("Invalid drawdown format. Use comma-separated values like -5,-10,-15")
+    st.error("Invalid drawdown input")
     st.stop()
 
 if len(levels) == 0:
-    st.warning("Please enter valid drawdown levels.")
     st.stop()
 
 # -------------------------------------------------
-# Capital Calculations
+# Capital Logic
 # -------------------------------------------------
 
-cash_available = total_portfolio - current_equity
-max_equity_value_allowed = (target_max_equity_pct / 100) * total_portfolio
-max_deployable = max_equity_value_allowed - current_equity
-deployable_cash = min(cash_available, max(max_deployable, 0))
-
-current_equity_pct = (current_equity / total_portfolio) * 100
-
-# -------------------------------------------------
-# Risk Diagnostics
-# -------------------------------------------------
-
-st.sidebar.markdown("---")
-st.sidebar.header("Risk Diagnostics")
-
-st.sidebar.write(f"Current Equity Allocation: {current_equity_pct:.2f}%")
-
-if current_equity_pct > target_max_equity_pct:
-    st.sidebar.warning("Already above target max allocation.")
-
-# -------------------------------------------------
-# Deployment Engine
-# -------------------------------------------------
+cash = total_portfolio - current_equity
+max_equity = (target_max_equity_pct/100) * total_portfolio
+max_deployable = max_equity - current_equity
+deployable = min(cash, max(max_deployable, 0))
 
 def generate_plan(mode):
-    num_stages = len(levels)
 
-    if mode == "Equal Allocation":
-        weights = [1] * num_stages
-    else:
-        weights = list(range(1, num_stages + 1))
+    n = len(levels)
 
+    weights = [1]*n if mode=="Equal Allocation" else list(range(1,n+1))
     total_weight = sum(weights)
 
-    equity_value = current_equity
-    remaining_cash = cash_available
-    deployed_so_far = 0
+    equity = current_equity
+    deployed = 0
+    rows=[]
 
-    rows = []
+    for i in range(n):
 
-    for i in range(num_stages):
-        planned = deployable_cash * (weights[i] / total_weight)
+        planned = deployable * (weights[i]/total_weight)
 
-        if deployed_so_far + planned > deployable_cash:
-            planned = deployable_cash - deployed_so_far
+        if deployed + planned > deployable:
+            planned = deployable - deployed
 
-        deploy_amount = max(planned, 0)
-
-        equity_value += deploy_amount
-        remaining_cash -= deploy_amount
-        deployed_so_far += deploy_amount
-
-        equity_pct = (equity_value / total_portfolio) * 100
+        equity += planned
+        deployed += planned
 
         rows.append({
-            "Drawdown Level (%)": -levels[i],
-            "Deploy Amount (₹)": round(deploy_amount, 2),
-            "Equity After Deployment (₹)": round(equity_value, 2),
-            "Remaining Cash (₹)": round(remaining_cash, 2),
-            "Equity Allocation (%)": round(equity_pct, 2)
+            "Drawdown (%)": -levels[i],
+            "Equity Value (₹)": equity
         })
 
     return pd.DataFrame(rows)
 
 # -------------------------------------------------
-# Execution
+# Deployment Output
 # -------------------------------------------------
 
-if cash_available <= 0:
-    st.warning("No cash available for deployment.")
-
-elif deployable_cash <= 0:
-    st.warning("Deployment capped. Already at target allocation.")
-
+if deployable <= 0:
+    st.warning("No deployable capital.")
 else:
 
-    st.subheader("Deployment Plan")
+    df = generate_plan(mode)
 
-    if compare_mode:
+    st.subheader("Deployment Path")
+    st.dataframe(df, use_container_width=True)
 
-        df_equal = generate_plan("Equal Allocation")
-        df_aggressive = generate_plan("Progressively Aggressive")
+    # Capital Allocation Curve
+    st.line_chart(df.set_index("Drawdown (%)"))
 
-        col1, col2 = st.columns(2)
+# -------------------------------------------------
+# Crash Replay Simulation
+# -------------------------------------------------
 
-        with col1:
-            st.write("Equal Allocation")
-            st.dataframe(df_equal, use_container_width=True)
+if use_crash_replay and deployable > 0:
 
-        with col2:
-            st.write("Progressively Aggressive")
-            st.dataframe(df_aggressive, use_container_width=True)
+    st.subheader("Crash Replay Simulation")
 
-        # Chart
-        chart_df = pd.DataFrame({
-            "Drawdown": df_equal["Drawdown Level (%)"],
-            "Equal Allocation": df_equal["Equity Allocation (%)"],
-            "Aggressive Allocation": df_aggressive["Equity Allocation (%)"]
-        }).set_index("Drawdown")
-
-        st.subheader("Equity Allocation Comparison")
-        st.line_chart(chart_df)
-
+    if crash_type.startswith("2008"):
+        crash_depth = 55
+        recovery_months = 36
     else:
+        crash_depth = 35
+        recovery_months = 12
 
-        df = generate_plan(weighting_mode)
+    peak = df.iloc[0]["Equity Value (₹)"]
+    crash_value = peak * (1 - crash_depth/100)
 
-        st.dataframe(df, use_container_width=True)
+    monthly_recovery = (peak/crash_value)**(1/recovery_months) - 1
 
-        chart_df = df.set_index("Drawdown Level (%)")[
-            ["Equity Allocation (%)"]
-        ]
+    values=[crash_value]
+    for _ in range(recovery_months):
+        values.append(values[-1]*(1+monthly_recovery))
 
-        st.subheader("Equity Allocation Path")
-        st.line_chart(chart_df)
+    crash_df = pd.DataFrame({
+        "Month": list(range(len(values))),
+        "Portfolio Value": values
+    }).set_index("Month")
 
-        # Capital Summary
-        st.subheader("Capital Summary")
+    st.line_chart(crash_df)
 
-        col1, col2 = st.columns(2)
+    st.metric("Months to Recover Peak", recovery_months)
 
-        with col1:
-            st.metric("Cash Available", f"₹{cash_available:,.0f}")
-            st.metric("Max Deployable (Capped)", f"₹{deployable_cash:,.0f}")
+# -------------------------------------------------
+# Monte Carlo
+# -------------------------------------------------
 
-        with col2:
-            final_pct = df.iloc[-1]["Equity Allocation (%)"]
-            st.metric("Final Equity Allocation", f"{final_pct}%")
+if use_monte_carlo and deployable > 0:
 
-        if deployable_cash < cash_available:
-            st.info("Deployment capped at target maximum equity allocation.")
+    st.subheader("Monte Carlo Projection")
 
-        st.success("Deployment plan generated successfully.")
+    start_value = df.iloc[-1]["Equity Value (₹)"]
+
+    returns = np.random.normal(
+        exp_return/100,
+        volatility/100,
+        (simulations, years)
+    )
+
+    growth = start_value * np.cumprod(1+returns, axis=1)
+    final_vals = growth[:,-1]
+
+    median = np.median(final_vals)
+    p5 = np.percentile(final_vals,5)
+    p95 = np.percentile(final_vals,95)
+
+    col1,col2,col3 = st.columns(3)
+    col1.metric("Median Final Value", f"₹{median:,.0f}")
+    col2.metric("5th Percentile", f"₹{p5:,.0f}")
+    col3.metric("95th Percentile", f"₹{p95:,.0f}")
+
+    sharpe = (exp_return-5)/volatility if volatility!=0 else 0
+    st.metric("Risk-Adjusted Score (Sharpe Proxy)", round(sharpe,2))
+
+    st.line_chart(pd.DataFrame(growth.T))
