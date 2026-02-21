@@ -282,7 +282,7 @@ with tab2:
             if pf_months == 0 and pf_total >= pre_crash_total:
                 pf_months = month
 
-            # NIFTY 50 recovery
+            # NIFTY 50 recovery (benchmark remains contribution-neutral)
             n50_value *= (1 + n50_monthly)
             n50_value = max(n50_value + net_monthly_flow, 0)
             n50_path.append(n50_value)
@@ -290,7 +290,7 @@ with tab2:
             if n50_months == 0 and n50_value >= pre_crash_total:
                 n50_months = month
 
-            # NIFTY 500 recovery
+            # NIFTY 500 recovery (benchmark remains contribution-neutral)
             n500_value *= (1 + n500_monthly)
             n500_value = max(n500_value + net_monthly_flow, 0)
             n500_path.append(n500_value)
