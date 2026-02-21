@@ -1,7 +1,21 @@
+import streamlit.components.v1 as components
 import streamlit as st
 import pandas as pd
 
 st.set_page_config(page_title="Drawdown Deployment Calculator", layout="wide")
+GA_MEASUREMENT_ID = "G-2NC6JTLL3R"
+
+components.html(f"""
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){{dataLayer.push(arguments);}}
+gtag('js', new Date());
+gtag('config', '{GA_MEASUREMENT_ID}');
+</script>
+""", height=0)
+
 
 st.title("Drawdown Deployment Calculator")
 st.write("Structured capital deployment framework for disciplined equity investing.")
