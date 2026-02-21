@@ -284,6 +284,7 @@ with tab2:
 
             # NIFTY 50 recovery (benchmark remains contribution-neutral)
             n50_value *= (1 + n50_monthly)
+            n50_value = max(n50_value + net_monthly_flow, 0)
             n50_path.append(n50_value)
 
             if n50_months == 0 and n50_value >= pre_crash_total:
@@ -291,6 +292,7 @@ with tab2:
 
             # NIFTY 500 recovery (benchmark remains contribution-neutral)
             n500_value *= (1 + n500_monthly)
+            n500_value = max(n500_value + net_monthly_flow, 0)
             n500_path.append(n500_value)
 
             if n500_months == 0 and n500_value >= pre_crash_total:
@@ -310,7 +312,7 @@ with tab2:
         col3.metric("NIFTY 500 Recovery (Months)", n500_months)
 
         flow_label = f"₹{net_monthly_flow:,.0f}"
-        st.caption(f"Monthly net cashflow applied to Portfolio path only: {flow_label}")
+        st.caption(f"Monthly net cashflow applied in recovery paths: {flow_label}")
 # -------------------------------------------------
 # TAB 3 — Monte Carlo (Optimized)
 # -------------------------------------------------
