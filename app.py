@@ -44,6 +44,7 @@ def send_ga_event():
 
 # Fire page view event
 send_ga_event()
+st.write("GA event sent")
 
 # -------------------------------------------------
 # Title
