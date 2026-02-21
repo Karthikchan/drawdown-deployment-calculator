@@ -125,6 +125,40 @@ def generate_plan(mode):
 
     return pd.DataFrame(rows)
 
+def crash_equity_and_cash_at_bottom(
+    mode,
+    crash_drop,
+    initial_equity,
+    deployable_capital,
+    available_cash
+):
+    n = len(levels)
+    weights = [1] * n if mode == "Equal Allocation" else list(range(1, n + 1))
+    total_weight = sum(weights)
+
+    crash_equity_value = initial_equity * (1 - crash_drop)
+    cash_balance = available_cash
+
+    for i in range(n):
+        trigger_drop = levels[i] / 100
+
+        # Deploy only if the crash actually reaches this drawdown level.
+        if trigger_drop > crash_drop:
+            continue
+
+        planned = deployable_capital * (weights[i] / total_weight)
+        planned = min(planned, cash_balance)
+
+        if planned <= 0:
+            continue
+
+        # Tranche bought at trigger_drop and marked to crash bottom.
+        tranche_to_bottom_factor = (1 - crash_drop) / (1 - trigger_drop)
+        crash_equity_value += planned * tranche_to_bottom_factor
+        cash_balance -= planned
+
+    return crash_equity_value, cash_balance
+
 df = generate_plan(deployment_mode) if deployable > 0 else None
 
 # -------------------------------------------------
@@ -191,16 +225,16 @@ with tab2:
         n50_monthly = (1 + n50_annual) ** (1/12) - 1
         n500_monthly = (1 + n500_annual) ** (1/12) - 1
 
-        # Use selected deployment mode
-        df_mode = generate_plan(deployment_mode)
+        pre_crash_total = total_portfolio
 
-        # Portfolio at crash moment
-        equity_before = df_mode.iloc[-1]["Equity Value (₹)"]
-        cash_before = total_portfolio - equity_before
-        pre_crash_total = equity_before + cash_before
-
-        # Apply crash
-        pf_equity = equity_before * (1 - pf_drop)
+        # Portfolio value at crash bottom after staged deployments.
+        pf_equity, cash_before = crash_equity_and_cash_at_bottom(
+            deployment_mode,
+            pf_drop,
+            current_equity,
+            deployable,
+            cash
+        )
         pf_total = pf_equity + cash_before
 
         n50_value = pre_crash_total * (1 - n50_drop)
