@@ -5,16 +5,16 @@ import requests
 import uuid
 
 # -------------------------------------------------
-# Page Setup
+# Page Setup (Consistent Naming)
 # -------------------------------------------------
 
 st.set_page_config(
-    page_title="Capital Deployment Engine",
+    page_title="Drawdown Deployment Calculator",
     layout="wide"
 )
 
 # -------------------------------------------------
-# Analytics (Lightweight)
+# Lightweight Analytics
 # -------------------------------------------------
 
 GA_MEASUREMENT_ID = st.secrets.get("GA_MEASUREMENT_ID")
@@ -42,12 +42,12 @@ if GA_MEASUREMENT_ID and GA_API_SECRET:
 # Title
 # -------------------------------------------------
 
-st.title("Capital Deployment Engine")
-st.write("Structured allocation, crash replay and probabilistic modeling.")
+st.title("Drawdown Deployment Calculator")
+st.write("Structured capital deployment with equity cap discipline.")
 st.caption("Best viewed on desktop.")
 
 # -------------------------------------------------
-# Sidebar Inputs (Global)
+# Sidebar Inputs
 # -------------------------------------------------
 
 st.sidebar.header("Portfolio Inputs")
@@ -132,14 +132,14 @@ df = generate_plan(deployment_mode) if deployable > 0 else None
 # -------------------------------------------------
 
 tab1, tab2, tab3, tab4 = st.tabs([
-    "Deployment Engine",
+    "Deployment Plan",
     "Crash Replay",
     "Monte Carlo",
     "Risk Diagnostics"
 ])
 
 # -------------------------------------------------
-# TAB 1
+# TAB 1 — Deployment
 # -------------------------------------------------
 
 with tab1:
@@ -150,19 +150,24 @@ with tab1:
         st.subheader("Deployment Plan")
         st.dataframe(df, use_container_width=True)
 
-        st.subheader("Allocation Curve")
-        st.line_chart(df.set_index("Drawdown (%)")[["Equity Allocation (%)"]])
+        st.subheader("Equity Allocation Curve")
+        st.line_chart(
+            df.set_index("Drawdown (%)")[["Equity Allocation (%)"]]
+        )
 
 # -------------------------------------------------
-# TAB 2
+# TAB 2 — Crash Replay
 # -------------------------------------------------
 
 with tab2:
 
-    crash_type = st.selectbox("Crash Type", [
-        "2008-Style (Deep, Slow Recovery)",
-        "2020-Style (Sharp, Fast Recovery)"
-    ])
+    crash_type = st.selectbox(
+        "Crash Type",
+        [
+            "2008-Style (Deep, Slow Recovery)",
+            "2020-Style (Sharp, Fast Recovery)"
+        ]
+    )
 
     if deployable > 0:
 
@@ -178,7 +183,7 @@ with tab2:
 
         monthly_recovery = (peak/crash_value)**(1/recovery_months) - 1
 
-        values=[crash_value]
+        values = [crash_value]
         for _ in range(recovery_months):
             values.append(values[-1]*(1+monthly_recovery))
 
@@ -190,7 +195,7 @@ with tab2:
         st.metric("Months to Recover Peak", recovery_months)
 
 # -------------------------------------------------
-# TAB 3 – Optimized Monte Carlo
+# TAB 3 — Optimized Monte Carlo
 # -------------------------------------------------
 
 @st.cache_data(show_spinner=False)
@@ -205,7 +210,7 @@ def run_monte_carlo(start_value, simulations, years, exp_return, volatility):
 
 with tab3:
 
-    run_mc = st.checkbox("Enable Monte Carlo")
+    run_mc = st.checkbox("Enable Monte Carlo Simulation")
 
     if run_mc and deployable > 0:
 
@@ -226,10 +231,10 @@ with tab3:
                 volatility
             )
 
-            final_vals = growth[:,-1]
+            final_vals = growth[:, -1]
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("Median Final", f"₹{np.median(final_vals):,.0f}")
+            col1.metric("Median Final Value", f"₹{np.median(final_vals):,.0f}")
             col2.metric("5th Percentile", f"₹{np.percentile(final_vals,5):,.0f}")
             col3.metric("95th Percentile", f"₹{np.percentile(final_vals,95):,.0f}")
 
@@ -247,7 +252,7 @@ with tab3:
             st.line_chart(mc_plot)
 
 # -------------------------------------------------
-# TAB 4
+# TAB 4 — Risk Diagnostics
 # -------------------------------------------------
 
 with tab4:
@@ -259,6 +264,6 @@ with tab4:
     st.metric("Deployable Capital (₹)", f"{deployable:,.0f}")
 
     if current_pct > target_max_equity_pct:
-        st.error("Above target allocation cap.")
+        st.error("Current equity exceeds allocation cap.")
     else:
         st.success("Within allocation limits.")
