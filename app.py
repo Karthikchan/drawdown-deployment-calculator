@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import requests
+import uuid
 
 # -------------------------------------------------
 # Page Configuration
@@ -11,23 +13,37 @@ st.set_page_config(
 )
 
 # -------------------------------------------------
-# Google Analytics (GA4)
+# Server-Side Google Analytics Tracking
 # -------------------------------------------------
 
 GA_MEASUREMENT_ID = "G-2NC6JTLL3R"
+GA_API_SECRET = "PASTE_YOUR_API_SECRET_HERE"  # <-- Replace with your real API secret
 
-st.markdown(
-    f"""
-    <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){{dataLayer.push(arguments);}}
-        gtag('js', new Date());
-        gtag('config', '{GA_MEASUREMENT_ID}');
-    </script>
-    """,
-    unsafe_allow_html=True
-)
+def send_ga_event():
+    client_id = str(uuid.uuid4())
+
+    url = (
+        f"https://www.google-analytics.com/mp/collect"
+        f"?measurement_id={GA_MEASUREMENT_ID}"
+        f"&api_secret={GA_API_SECRET}"
+    )
+
+    payload = {
+        "client_id": client_id,
+        "events": [
+            {
+                "name": "page_view"
+            }
+        ]
+    }
+
+    try:
+        requests.post(url, json=payload, timeout=2)
+    except:
+        pass
+
+# Fire page view event
+send_ga_event()
 
 # -------------------------------------------------
 # Title
@@ -81,7 +97,6 @@ cash_available = total_portfolio - current_equity
 max_equity_value_allowed = (target_max_equity_pct / 100) * total_portfolio
 max_deployable = max_equity_value_allowed - current_equity
 
-# Parse drawdown levels safely
 levels = [float(x.strip()) for x in drawdown_levels.split(",") if x.strip() != ""]
 num_stages = len(levels)
 
@@ -102,7 +117,6 @@ else:
         st.warning("Already at or above target equity allocation.")
 
     else:
-        # Weighting logic
         if weighting_mode == "Equal Allocation":
             weights = [1] * num_stages
         else:
@@ -115,12 +129,10 @@ else:
         equity_value = current_equity
         deployed_so_far = 0
 
-        # Deployment loop
         for i in range(num_stages):
 
             planned_deploy = deployable_cash * (weights[i] / total_weight)
 
-            # Cap at max deployable
             if deployed_so_far + planned_deploy > deployable_cash:
                 planned_deploy = deployable_cash - deployed_so_far
 
@@ -143,7 +155,7 @@ else:
         df = pd.DataFrame(deployment_plan)
 
         # -------------------------------------------------
-        # Output Section (Single Rendering)
+        # Output Section
         # -------------------------------------------------
 
         st.subheader("Deployment Plan")
