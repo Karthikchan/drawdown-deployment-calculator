@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 
 # -------------------------------------------------
@@ -13,24 +12,25 @@ st.set_page_config(
 
 # -------------------------------------------------
 # Google Analytics (GA4)
-# Replace with your Measurement ID
 # -------------------------------------------------
 
 GA_MEASUREMENT_ID = "G-2NC6JTLL3R"
 
-components.html(f"""
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
-<script>
-window.dataLayer = window.dataLayer || [];
-function gtag(){{dataLayer.push(arguments);}}
-gtag('js', new Date());
-gtag('config', '{GA_MEASUREMENT_ID}');
-</script>
-""", height=0)
+st.markdown(
+    f"""
+    <script async src="https://www.googletagmanager.com/gtag/js?id={GA_MEASUREMENT_ID}"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){{dataLayer.push(arguments);}}
+        gtag('js', new Date());
+        gtag('config', '{GA_MEASUREMENT_ID}');
+    </script>
+    """,
+    unsafe_allow_html=True
+)
 
 # -------------------------------------------------
-# App Title
+# Title
 # -------------------------------------------------
 
 st.title("Drawdown Deployment Calculator")
@@ -77,21 +77,16 @@ weighting_mode = st.sidebar.selectbox(
 # Core Calculations
 # -------------------------------------------------
 
-# Cash available for deployment
 cash_available = total_portfolio - current_equity
-
-# Maximum equity allowed based on user cap
 max_equity_value_allowed = (target_max_equity_pct / 100) * total_portfolio
-
-# Maximum deployable capital without breaching cap
 max_deployable = max_equity_value_allowed - current_equity
 
-# Parse drawdown levels
+# Parse drawdown levels safely
 levels = [float(x.strip()) for x in drawdown_levels.split(",") if x.strip() != ""]
 num_stages = len(levels)
 
 # -------------------------------------------------
-# Validation
+# Validation & Deployment Logic
 # -------------------------------------------------
 
 if cash_available <= 0:
@@ -101,18 +96,16 @@ elif num_stages == 0:
     st.warning("Please enter valid drawdown levels.")
 
 else:
-    # Ensure deployment does not exceed cap
     deployable_cash = min(cash_available, max_deployable)
 
     if deployable_cash <= 0:
         st.warning("Already at or above target equity allocation.")
 
     else:
-        # Determine weighting logic
+        # Weighting logic
         if weighting_mode == "Equal Allocation":
             weights = [1] * num_stages
         else:
-            # More weight to deeper drawdowns
             weights = list(range(1, num_stages + 1))
 
         total_weight = sum(weights)
@@ -122,22 +115,17 @@ else:
         equity_value = current_equity
         deployed_so_far = 0
 
-        # -------------------------------------------------
-        # Deployment Loop
-        # -------------------------------------------------
-
+        # Deployment loop
         for i in range(num_stages):
 
-            # Planned allocation based on weight
             planned_deploy = deployable_cash * (weights[i] / total_weight)
 
-            # Prevent overshooting max deployable amount
+            # Cap at max deployable
             if deployed_so_far + planned_deploy > deployable_cash:
                 planned_deploy = deployable_cash - deployed_so_far
 
             deploy_amount = max(planned_deploy, 0)
 
-            # Update portfolio state
             equity_value += deploy_amount
             remaining_cash -= deploy_amount
             deployed_so_far += deploy_amount
@@ -155,14 +143,13 @@ else:
         df = pd.DataFrame(deployment_plan)
 
         # -------------------------------------------------
-        # Output Section
+        # Output Section (Single Rendering)
         # -------------------------------------------------
 
         st.subheader("Deployment Plan")
         st.dataframe(df, use_container_width=True)
 
         st.subheader("Summary")
-
         st.write(f"Cash Available: ₹{cash_available:,.2f}")
         st.write(f"Max Deployable (Capped): ₹{deployable_cash:,.2f}")
         st.write(
