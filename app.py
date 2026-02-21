@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import requests
 import uuid
+from streamlit.errors import StreamlitSecretNotFoundError
 
 # -------------------------------------------------
 # Page Setup
@@ -17,8 +18,12 @@ st.set_page_config(
 # Lightweight Analytics
 # -------------------------------------------------
 
-GA_MEASUREMENT_ID = st.secrets.get("GA_MEASUREMENT_ID")
-GA_API_SECRET = st.secrets.get("GA_API_SECRET")
+try:
+    GA_MEASUREMENT_ID = st.secrets.get("GA_MEASUREMENT_ID")
+    GA_API_SECRET = st.secrets.get("GA_API_SECRET")
+except StreamlitSecretNotFoundError:
+    GA_MEASUREMENT_ID = None
+    GA_API_SECRET = None
 
 def send_ga_event():
     client_id = str(uuid.uuid4())
@@ -73,6 +78,14 @@ deployment_mode = st.sidebar.selectbox(
     ["Equal Allocation", "Progressively Aggressive"]
 )
 
+monthly_contribution = st.sidebar.number_input(
+    "Monthly Contribution (₹)", 0.0, 1e9, 0.0, step=1000.0
+)
+
+monthly_withdrawal = st.sidebar.number_input(
+    "Monthly Withdrawal (₹)", 0.0, 1e9, 0.0, step=1000.0
+)
+
 # -------------------------------------------------
 # Validation
 # -------------------------------------------------
@@ -125,6 +138,40 @@ def generate_plan(mode):
 
     return pd.DataFrame(rows)
 
+def crash_equity_and_cash_at_bottom(
+    mode,
+    crash_drop,
+    initial_equity,
+    deployable_capital,
+    available_cash
+):
+    n = len(levels)
+    weights = [1] * n if mode == "Equal Allocation" else list(range(1, n + 1))
+    total_weight = sum(weights)
+
+    crash_equity_value = initial_equity * (1 - crash_drop)
+    cash_balance = available_cash
+
+    for i in range(n):
+        trigger_drop = levels[i] / 100
+
+        # Deploy only if the crash actually reaches this drawdown level.
+        if trigger_drop > crash_drop:
+            continue
+
+        planned = deployable_capital * (weights[i] / total_weight)
+        planned = min(planned, cash_balance)
+
+        if planned <= 0:
+            continue
+
+        # Tranche bought at trigger_drop and marked to crash bottom.
+        tranche_to_bottom_factor = (1 - crash_drop) / (1 - trigger_drop)
+        crash_equity_value += planned * tranche_to_bottom_factor
+        cash_balance -= planned
+
+    return crash_equity_value, cash_balance
+
 df = generate_plan(deployment_mode) if deployable > 0 else None
 
 # -------------------------------------------------
@@ -167,40 +214,50 @@ with tab2:
 
     crash_type = st.selectbox(
         "Crash Scenario",
-        ["2008-Style Crash", "2020-Style Crash"]
+        ["2008-Style Crash", "2020-Style Crash", "Custom"]
     )
 
     if deployable > 0:
 
-        # Crash depths
+        # Crash depths and return assumptions
         if crash_type.startswith("2008"):
             pf_drop = 0.55
             n50_drop = 0.50
             n500_drop = 0.55
-        else:
+            pf_annual = 0.12
+            n50_annual = 0.13
+            n500_annual = 0.14
+        elif crash_type.startswith("2020"):
             pf_drop = 0.35
             n50_drop = 0.38
             n500_drop = 0.42
-
-        # Return assumptions
-        pf_annual = 0.12
-        n50_annual = 0.13
-        n500_annual = 0.14
+            pf_annual = 0.12
+            n50_annual = 0.13
+            n500_annual = 0.14
+        else:
+            st.caption("Tune a custom crash and recovery profile.")
+            pf_drop = st.slider("Portfolio Crash Depth (%)", 5, 70, 40) / 100
+            n50_drop = st.slider("NIFTY 50 Crash Depth (%)", 5, 70, 38) / 100
+            n500_drop = st.slider("NIFTY 500 Crash Depth (%)", 5, 70, 42) / 100
+            pf_annual = st.slider("Portfolio Annual Recovery Return (%)", 1, 25, 12) / 100
+            n50_annual = st.slider("NIFTY 50 Annual Recovery Return (%)", 1, 25, 13) / 100
+            n500_annual = st.slider("NIFTY 500 Annual Recovery Return (%)", 1, 25, 14) / 100
 
         pf_monthly = (1 + pf_annual) ** (1/12) - 1
         n50_monthly = (1 + n50_annual) ** (1/12) - 1
         n500_monthly = (1 + n500_annual) ** (1/12) - 1
+        net_monthly_flow = monthly_contribution - monthly_withdrawal
 
-        # Use selected deployment mode
-        df_mode = generate_plan(deployment_mode)
+        pre_crash_total = total_portfolio
 
-        # Portfolio at crash moment
-        equity_before = df_mode.iloc[-1]["Equity Value (₹)"]
-        cash_before = total_portfolio - equity_before
-        pre_crash_total = equity_before + cash_before
-
-        # Apply crash
-        pf_equity = equity_before * (1 - pf_drop)
+        # Portfolio value at crash bottom after staged deployments.
+        pf_equity, cash_before = crash_equity_and_cash_at_bottom(
+            deployment_mode,
+            pf_drop,
+            current_equity,
+            deployable,
+            cash
+        )
         pf_total = pf_equity + cash_before
 
         n50_value = pre_crash_total * (1 - n50_drop)
@@ -216,8 +273,9 @@ with tab2:
 
         for month in range(1, 181):
 
-            # Portfolio recovery (equity grows, cash constant)
+            # Portfolio recovery (equity grows, then net cashflow is invested/withdrawn)
             pf_equity *= (1 + pf_monthly)
+            pf_equity = max(pf_equity + net_monthly_flow, 0)
             pf_total = pf_equity + cash_before
             pf_path.append(pf_total)
 
@@ -226,6 +284,7 @@ with tab2:
 
             # NIFTY 50 recovery
             n50_value *= (1 + n50_monthly)
+            n50_value = max(n50_value + net_monthly_flow, 0)
             n50_path.append(n50_value)
 
             if n50_months == 0 and n50_value >= pre_crash_total:
@@ -233,6 +292,7 @@ with tab2:
 
             # NIFTY 500 recovery
             n500_value *= (1 + n500_monthly)
+            n500_value = max(n500_value + net_monthly_flow, 0)
             n500_path.append(n500_value)
 
             if n500_months == 0 and n500_value >= pre_crash_total:
@@ -250,6 +310,9 @@ with tab2:
         col1.metric("Portfolio Recovery (Months)", pf_months)
         col2.metric("NIFTY 50 Recovery (Months)", n50_months)
         col3.metric("NIFTY 500 Recovery (Months)", n500_months)
+
+        flow_label = f"₹{net_monthly_flow:,.0f}"
+        st.caption(f"Monthly net cashflow applied in recovery paths: {flow_label}")
 # -------------------------------------------------
 # TAB 3 — Monte Carlo (Optimized)
 # -------------------------------------------------
