@@ -17,7 +17,7 @@ st.set_page_config(
 # -------------------------------------------------
 
 GA_MEASUREMENT_ID = "G-2NC6JTLL3R"
-GA_API_SECRET = "PASTE_YOUR_API_SECRET_HERE"  # <-- Replace with your real API secret
+GA_API_SECRET = st.secrets["GA_API_SECRET"]
 
 def send_ga_event():
     client_id = str(uuid.uuid4())
