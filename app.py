@@ -9,10 +9,7 @@ from streamlit.errors import StreamlitSecretNotFoundError
 # Page Setup
 # -------------------------------------------------
 
-st.set_page_config(
-    page_title="Drawdown Deployment Calculator",
-    layout="wide"
-)
+st.set_page_config(page_title="Drawdown Deployment Calculator", layout="wide")
 
 # -------------------------------------------------
 # Lightweight Analytics
@@ -35,21 +32,60 @@ def send_ga_event():
     payload = {"client_id": client_id, "events": [{"name": "page_view"}]}
     try:
         requests.post(url, json=payload, timeout=1)
-    except:
+    except Exception:
         pass
 
-if GA_MEASUREMENT_ID and GA_API_SECRET:
-    if "ga_sent" not in st.session_state:
-        send_ga_event()
-        st.session_state.ga_sent = True
+
+if GA_MEASUREMENT_ID and GA_API_SECRET and "ga_sent" not in st.session_state:
+    send_ga_event()
+    st.session_state.ga_sent = True
+
+# -------------------------------------------------
+# Styling
+# -------------------------------------------------
+
+st.markdown(
+    """
+    <style>
+      .stApp { background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); }
+      .premium-card {
+        border: 1px solid rgba(99, 102, 241, 0.22);
+        border-radius: 14px;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.84);
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+      }
+      .premium-card h4 { margin: 0 0 6px 0; font-size: 1rem; }
+      .premium-card p { margin: 0; color: #334155; font-size: 0.88rem; }
+      .block-container { padding-top: 1.5rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -------------------------------------------------
 # Title
 # -------------------------------------------------
 
 st.title("Drawdown Deployment Calculator")
-st.write("Structured capital deployment with equity cap discipline.")
-st.caption("Best viewed on desktop.")
+st.write("An execution-first framework for disciplined drawdown investing.")
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.markdown(
+        '<div class="premium-card"><h4>1) Entry Discipline</h4><p>Define exactly how much to deploy at each drawdown level.</p></div>',
+        unsafe_allow_html=True,
+    )
+with c2:
+    st.markdown(
+        '<div class="premium-card"><h4>2) Equity Cap Risk Control</h4><p>Stay inside your allocation guardrails in every scenario.</p></div>',
+        unsafe_allow_html=True,
+    )
+with c3:
+    st.markdown(
+        '<div class="premium-card"><h4>3) Recovery Expectations</h4><p>Compare portfolio recovery to benchmark paths under crash stress.</p></div>',
+        unsafe_allow_html=True,
+    )
 
 # -------------------------------------------------
 # Sidebar Inputs
@@ -57,25 +93,12 @@ st.caption("Best viewed on desktop.")
 
 st.sidebar.header("Portfolio Inputs")
 
-total_portfolio = st.sidebar.number_input(
-    "Total Portfolio (₹)", 0.0, 1e12, 1000000.0
-)
-
-current_equity = st.sidebar.number_input(
-    "Current Equity (₹)", 0.0, 1e12, 700000.0
-)
-
-target_max_equity_pct = st.sidebar.slider(
-    "Max Equity Allocation (%)", 0, 100, 85
-)
-
-drawdown_levels = st.sidebar.text_input(
-    "Drawdown Levels (%)", "-5,-10,-15,-20,-30"
-)
-
+total_portfolio = st.sidebar.number_input("Total Portfolio (₹)", 0.0, 1e12, 1000000.0)
+current_equity = st.sidebar.number_input("Current Equity (₹)", 0.0, 1e12, 700000.0)
+target_max_equity_pct = st.sidebar.slider("Max Equity Allocation (%)", 0, 100, 85)
+drawdown_levels = st.sidebar.text_input("Drawdown Levels (%)", "-5,-10,-15,-20,-30")
 deployment_mode = st.sidebar.selectbox(
-    "Deployment Mode",
-    ["Equal Allocation", "Progressively Aggressive"]
+    "Deployment Mode", ["Equal Allocation", "Progressively Aggressive"]
 )
 
 monthly_contribution = st.sidebar.number_input(
@@ -93,11 +116,15 @@ monthly_withdrawal = st.sidebar.number_input(
 if total_portfolio == 0:
     st.stop()
 
+if current_equity > total_portfolio:
+    st.error("Current equity cannot exceed total portfolio.")
+    st.stop()
+
 try:
     raw = [x.strip() for x in drawdown_levels.split(",")]
     levels = sorted(list({abs(float(x)) for x in raw if x != ""}))
-except:
-    st.error("Invalid drawdown format.")
+except Exception:
+    st.error("Invalid drawdown format. Example: -5,-10,-20")
     st.stop()
 
 if len(levels) == 0:
@@ -112,9 +139,14 @@ max_equity = (target_max_equity_pct / 100) * total_portfolio
 max_deployable = max_equity - current_equity
 deployable = min(cash, max(max_deployable, 0))
 
+
+def get_weights(mode, n):
+    return [1] * n if mode == "Equal Allocation" else list(range(1, n + 1))
+
+
 def generate_plan(mode):
     n = len(levels)
-    weights = [1]*n if mode == "Equal Allocation" else list(range(1,n+1))
+    weights = get_weights(mode, n)
     total_weight = sum(weights)
 
     equity = current_equity
@@ -130,11 +162,14 @@ def generate_plan(mode):
         equity += planned
         deployed += planned
 
-        rows.append({
-            "Drawdown (%)": -levels[i],
-            "Equity Value (₹)": round(equity, 2),
-            "Equity Allocation (%)": round((equity/total_portfolio)*100, 2)
-        })
+        rows.append(
+            {
+                "Drawdown (%)": -levels[i],
+                "Planned Tranche (₹)": round(planned, 2),
+                "Equity Value (₹)": round(equity, 2),
+                "Equity Allocation (%)": round((equity / total_portfolio) * 100, 2),
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -178,38 +213,26 @@ df = generate_plan(deployment_mode) if deployable > 0 else None
 # Tabs
 # -------------------------------------------------
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Deployment Plan",
-    "Crash Replay",
-    "Monte Carlo",
-    "Risk Diagnostics"
-])
+tab1, tab2, tab3 = st.tabs(["Deployment Plan", "Crash Replay", "Risk Diagnostics"])
 
 # -------------------------------------------------
 # TAB 1
 # -------------------------------------------------
 
 with tab1:
-
     if deployable <= 0:
-        st.warning("No deployable capital.")
+        st.warning("No deployable capital under current equity cap.")
     else:
         st.subheader("Deployment Plan")
-        st.dataframe(df, use_container_width=True)
-
+        st.dataframe(df, width="stretch")
         st.subheader("Equity Allocation Curve")
         st.line_chart(df.set_index("Drawdown (%)")[["Equity Allocation (%)"]])
 
 # -------------------------------------------------
-# TAB 2 — Crash Replay with NIFTY Comparison
-# -------------------------------------------------
-
-# -------------------------------------------------
-# TAB 2 — Dynamic Crash Replay with Index Comparison
+# TAB 2
 # -------------------------------------------------
 
 with tab2:
-
     st.subheader("Crash Replay Comparison")
 
     crash_type = st.selectbox(
@@ -278,7 +301,6 @@ with tab2:
             pf_equity = max(pf_equity + net_monthly_flow, 0)
             pf_total = pf_equity + cash_before
             pf_path.append(pf_total)
-
             if pf_months == 0 and pf_total >= pre_crash_total:
                 pf_months = month
 
@@ -286,7 +308,6 @@ with tab2:
             n50_value *= (1 + n50_monthly)
             n50_value = max(n50_value + net_monthly_flow, 0)
             n50_path.append(n50_value)
-
             if n50_months == 0 and n50_value >= pre_crash_total:
                 n50_months = month
 
@@ -294,16 +315,10 @@ with tab2:
             n500_value *= (1 + n500_monthly)
             n500_value = max(n500_value + net_monthly_flow, 0)
             n500_path.append(n500_value)
-
             if n500_months == 0 and n500_value >= pre_crash_total:
                 n500_months = month
 
-        crash_df = pd.DataFrame({
-            "Portfolio": pf_path,
-            "NIFTY 50": n50_path,
-            "NIFTY 500": n500_path
-        })
-
+        crash_df = pd.DataFrame({"Portfolio": pf_path, "NIFTY 50": n50_path, "NIFTY 500": n500_path})
         st.line_chart(crash_df)
 
         col1, col2, col3 = st.columns(3)
@@ -370,16 +385,16 @@ with tab3:
             st.line_chart(mc_plot)
 
 # -------------------------------------------------
-# TAB 4
+# TAB 3
 # -------------------------------------------------
 
-with tab4:
+with tab3:
+    current_pct = (current_equity / total_portfolio) * 100
 
-    current_pct = (current_equity/total_portfolio)*100
-
-    st.metric("Current Equity Allocation (%)", round(current_pct,2))
-    st.metric("Maximum Allocation Cap (%)", target_max_equity_pct)
-    st.metric("Deployable Capital (₹)", f"{deployable:,.0f}")
+    a, b, c = st.columns(3)
+    a.metric("Current Equity Allocation (%)", round(current_pct, 2))
+    b.metric("Maximum Allocation Cap (%)", target_max_equity_pct)
+    c.metric("Deployable Capital (₹)", f"{deployable:,.0f}")
 
     if current_pct > target_max_equity_pct:
         st.error("Current equity exceeds allocation cap.")
