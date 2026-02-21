@@ -168,52 +168,42 @@ with tab2:
 
     if deployable > 0:
 
+        # Crash parameters
         if crash_type.startswith("2008"):
-            portfolio_drop = 55
-            portfolio_recovery = 36
-            nifty50_drop = 50
-            nifty50_recovery = 30
-            nifty500_drop = 55
-            nifty500_recovery = 34
+            crash_drop = 0.55
         else:
-            portfolio_drop = 35
-            portfolio_recovery = 12
-            nifty50_drop = 38
-            nifty50_recovery = 8
-            nifty500_drop = 42
-            nifty500_recovery = 10
+            crash_drop = 0.35
 
-        peak = df.iloc[-1]["Equity Value (₹)"]
+        # Monthly growth assumption (long-term expected return)
+        annual_return = 0.12
+        monthly_return = (1 + annual_return) ** (1/12) - 1
 
-        def simulate(drop, recovery_months):
-            crash_val = peak * (1 - drop/100)
-            monthly = (peak/crash_val)**(1/recovery_months) - 1
-            values = [crash_val]
-            for _ in range(recovery_months):
-                values.append(values[-1]*(1+monthly))
-            return values
+        # Use selected deployment mode
+        df_mode = df
 
-        portfolio_path = simulate(portfolio_drop, portfolio_recovery)
-        nifty50_path = simulate(nifty50_drop, nifty50_recovery)
-        nifty500_path = simulate(nifty500_drop, nifty500_recovery)
+        peak_equity = df_mode.iloc[-1]["Equity Value (₹)"]
+        peak_total = peak_equity + (total_portfolio - peak_equity)
 
-        max_len = max(len(portfolio_path), len(nifty50_path), len(nifty500_path))
+        # Split equity + cash
+        cash_component = total_portfolio - peak_equity
+        equity_after_crash = peak_equity * (1 - crash_drop)
 
-        def pad(lst):
-            return lst + [lst[-1]]*(max_len - len(lst))
+        portfolio_value = equity_after_crash + cash_component
 
-        crash_df = pd.DataFrame({
-            "Portfolio": pad(portfolio_path),
-            "NIFTY 50": pad(nifty50_path),
-            "NIFTY 500": pad(nifty500_path)
-        })
+        values = [portfolio_value]
+        months = 0
 
+        # Grow until prior peak recovered
+        while portfolio_value < total_portfolio and months < 120:
+            equity_after_crash *= (1 + monthly_return)
+            portfolio_value = equity_after_crash + cash_component
+            values.append(portfolio_value)
+            months += 1
+
+        crash_df = pd.DataFrame({"Portfolio": values})
         st.line_chart(crash_df)
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Portfolio Recovery (Months)", portfolio_recovery)
-        col2.metric("NIFTY 50 Recovery (Months)", nifty50_recovery)
-        col3.metric("NIFTY 500 Recovery (Months)", nifty500_recovery)
+        st.metric("Portfolio Recovery (Months)", months)
 
 # -------------------------------------------------
 # TAB 3 — Monte Carlo (Optimized)
