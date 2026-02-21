@@ -44,6 +44,7 @@ if GA_MEASUREMENT_ID and GA_API_SECRET:
 
 st.title("Capital Deployment Engine")
 st.write("Structured allocation, crash replay and probabilistic modeling.")
+st.caption("Best viewed on desktop.")
 
 # -------------------------------------------------
 # Sidebar Inputs (Global)
