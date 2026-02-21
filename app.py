@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import uuid
-import matplotlib.pyplot as plt
 
 # -------------------------------------------------
 # Page Configuration
@@ -36,7 +35,10 @@ def send_ga_event():
             {"name": "session_start", "params": {"session_id": session_id}},
             {
                 "name": "page_view",
-                "params": {"session_id": session_id, "engagement_time_msec": 100}
+                "params": {
+                    "session_id": session_id,
+                    "engagement_time_msec": 100
+                }
             }
         ]
     }
@@ -99,31 +101,16 @@ weighting_mode = st.sidebar.selectbox(
 compare_mode = st.sidebar.checkbox("Compare Both Modes")
 
 # -------------------------------------------------
-# Risk Diagnostics
+# Validation
 # -------------------------------------------------
-
-st.sidebar.markdown("---")
-st.sidebar.header("Risk Diagnostics")
 
 if total_portfolio == 0:
     st.error("Total portfolio cannot be zero.")
     st.stop()
 
-current_equity_pct = (current_equity / total_portfolio) * 100
-st.sidebar.write(f"Current Equity Allocation: {current_equity_pct:.2f}%")
-
-if current_equity_pct > target_max_equity_pct:
-    st.sidebar.error("Already above target max allocation.")
-
-# -------------------------------------------------
-# Parse Drawdowns Safely
-# -------------------------------------------------
-
 try:
     raw_levels = [x.strip() for x in drawdown_levels.split(",")]
-    levels = sorted(
-        list({abs(float(x)) for x in raw_levels if x != ""})
-    )
+    levels = sorted(list({abs(float(x)) for x in raw_levels if x != ""}))
 except:
     st.error("Invalid drawdown format. Use comma-separated values like -5,-10,-15")
     st.stop()
@@ -133,7 +120,7 @@ if len(levels) == 0:
     st.stop()
 
 # -------------------------------------------------
-# Core Capital Calculations
+# Capital Calculations
 # -------------------------------------------------
 
 cash_available = total_portfolio - current_equity
@@ -141,9 +128,22 @@ max_equity_value_allowed = (target_max_equity_pct / 100) * total_portfolio
 max_deployable = max_equity_value_allowed - current_equity
 deployable_cash = min(cash_available, max(max_deployable, 0))
 
+current_equity_pct = (current_equity / total_portfolio) * 100
 
 # -------------------------------------------------
-# Deployment Function
+# Risk Diagnostics
+# -------------------------------------------------
+
+st.sidebar.markdown("---")
+st.sidebar.header("Risk Diagnostics")
+
+st.sidebar.write(f"Current Equity Allocation: {current_equity_pct:.2f}%")
+
+if current_equity_pct > target_max_equity_pct:
+    st.sidebar.warning("Already above target max allocation.")
+
+# -------------------------------------------------
+# Deployment Engine
 # -------------------------------------------------
 
 def generate_plan(mode):
@@ -186,15 +186,16 @@ def generate_plan(mode):
 
     return pd.DataFrame(rows)
 
-
 # -------------------------------------------------
 # Execution
 # -------------------------------------------------
 
 if cash_available <= 0:
     st.warning("No cash available for deployment.")
+
 elif deployable_cash <= 0:
     st.warning("Deployment capped. Already at target allocation.")
+
 else:
 
     st.subheader("Deployment Plan")
@@ -214,31 +215,15 @@ else:
             st.write("Progressively Aggressive")
             st.dataframe(df_aggressive, use_container_width=True)
 
-        # Plot Comparison
+        # Chart
+        chart_df = pd.DataFrame({
+            "Drawdown": df_equal["Drawdown Level (%)"],
+            "Equal Allocation": df_equal["Equity Allocation (%)"],
+            "Aggressive Allocation": df_aggressive["Equity Allocation (%)"]
+        }).set_index("Drawdown")
+
         st.subheader("Equity Allocation Comparison")
-
-        fig, ax = plt.subplots()
-
-        ax.plot(
-            df_equal["Drawdown Level (%)"],
-            df_equal["Equity Allocation (%)"],
-            marker='o',
-            label="Equal"
-        )
-
-        ax.plot(
-            df_aggressive["Drawdown Level (%)"],
-            df_aggressive["Equity Allocation (%)"],
-            marker='o',
-            label="Aggressive"
-        )
-
-        ax.set_xlabel("Market Drawdown (%)")
-        ax.set_ylabel("Equity Allocation (%)")
-        ax.grid(True)
-        ax.legend()
-
-        st.pyplot(fig)
+        st.line_chart(chart_df)
 
     else:
 
@@ -246,31 +231,21 @@ else:
 
         st.dataframe(df, use_container_width=True)
 
-        # Allocation Curve
+        chart_df = df.set_index("Drawdown Level (%)")[
+            ["Equity Allocation (%)"]
+        ]
+
         st.subheader("Equity Allocation Path")
+        st.line_chart(chart_df)
 
-        fig, ax = plt.subplots()
-
-        ax.plot(
-            df["Drawdown Level (%)"],
-            df["Equity Allocation (%)"],
-            marker='o'
-        )
-
-        ax.set_xlabel("Market Drawdown (%)")
-        ax.set_ylabel("Equity Allocation (%)")
-        ax.grid(True)
-
-        st.pyplot(fig)
-
-        # Professional Summary Metrics
+        # Capital Summary
         st.subheader("Capital Summary")
 
         col1, col2 = st.columns(2)
 
         with col1:
             st.metric("Cash Available", f"₹{cash_available:,.0f}")
-            st.metric("Max Deployable", f"₹{deployable_cash:,.0f}")
+            st.metric("Max Deployable (Capped)", f"₹{deployable_cash:,.0f}")
 
         with col2:
             final_pct = df.iloc[-1]["Equity Allocation (%)"]
@@ -279,4 +254,4 @@ else:
         if deployable_cash < cash_available:
             st.info("Deployment capped at target maximum equity allocation.")
 
-        st.success("Rule-based deployment plan generated successfully.")
+        st.success("Deployment plan generated successfully.")
