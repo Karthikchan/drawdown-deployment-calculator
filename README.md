@@ -3,7 +3,7 @@
 A structured capital deployment framework for long-term equity investors.
 
 **Most investors:**
-Overdeploy too early
+Overdeploy too early.
 Freeze during deep corrections
 
 This tool enforces a staged deployment discipline across predefined drawdown levels.
