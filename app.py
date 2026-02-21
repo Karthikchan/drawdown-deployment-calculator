@@ -172,42 +172,84 @@ with tab2:
 
     if deployable > 0:
 
+        # Crash depths
         if crash_type.startswith("2008"):
-            crash_extra_drop = 0.20  # additional drop beyond last ladder
+            pf_drop = 0.55
+            n50_drop = 0.50
+            n500_drop = 0.55
         else:
-            crash_extra_drop = 0.10
+            pf_drop = 0.35
+            n50_drop = 0.38
+            n500_drop = 0.42
 
-        # Use selected mode
+        # Return assumptions
+        pf_annual = 0.12
+        n50_annual = 0.13
+        n500_annual = 0.14
+
+        pf_monthly = (1 + pf_annual) ** (1/12) - 1
+        n50_monthly = (1 + n50_annual) ** (1/12) - 1
+        n500_monthly = (1 + n500_annual) ** (1/12) - 1
+
+        # Use selected deployment mode
         df_mode = generate_plan(deployment_mode)
 
-        # Assume crash occurs after deepest drawdown level
-        deepest_stage_equity = df_mode.iloc[-1]["Equity Value (₹)"]
+        # Portfolio at crash moment
+        equity_before = df_mode.iloc[-1]["Equity Value (₹)"]
+        cash_before = total_portfolio - equity_before
+        pre_crash_total = equity_before + cash_before
 
-        cash_component = total_portfolio - deepest_stage_equity
-        peak_total = deepest_stage_equity + cash_component
+        # Apply crash
+        pf_equity = equity_before * (1 - pf_drop)
+        pf_total = pf_equity + cash_before
 
-        # Apply extra crash beyond ladder
-        crashed_equity = deepest_stage_equity * (1 - crash_extra_drop)
-        crashed_total = crashed_equity + cash_component
+        n50_value = pre_crash_total * (1 - n50_drop)
+        n500_value = pre_crash_total * (1 - n500_drop)
 
-        # Recovery assumptions
-        annual_return = 0.12
-        monthly_return = (1 + annual_return) ** (1/12) - 1
+        pf_path = [pf_total]
+        n50_path = [n50_value]
+        n500_path = [n500_value]
 
-        values = [crashed_total]
-        months = 0
-        equity_current = crashed_equity
+        pf_months = 0
+        n50_months = 0
+        n500_months = 0
 
-        while values[-1] < peak_total and months < 180:
-            equity_current *= (1 + monthly_return)
-            total_now = equity_current + cash_component
-            values.append(total_now)
-            months += 1
+        for month in range(1, 181):
 
-        crash_df = pd.DataFrame({"Portfolio": values})
+            # Portfolio recovery (equity grows, cash constant)
+            pf_equity *= (1 + pf_monthly)
+            pf_total = pf_equity + cash_before
+            pf_path.append(pf_total)
+
+            if pf_months == 0 and pf_total >= pre_crash_total:
+                pf_months = month
+
+            # NIFTY 50 recovery
+            n50_value *= (1 + n50_monthly)
+            n50_path.append(n50_value)
+
+            if n50_months == 0 and n50_value >= pre_crash_total:
+                n50_months = month
+
+            # NIFTY 500 recovery
+            n500_value *= (1 + n500_monthly)
+            n500_path.append(n500_value)
+
+            if n500_months == 0 and n500_value >= pre_crash_total:
+                n500_months = month
+
+        crash_df = pd.DataFrame({
+            "Portfolio": pf_path,
+            "NIFTY 50": n50_path,
+            "NIFTY 500": n500_path
+        })
+
         st.line_chart(crash_df)
 
-        st.metric("Portfolio Recovery (Months)", months)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Portfolio Recovery (Months)", pf_months)
+        col2.metric("NIFTY 50 Recovery (Months)", n50_months)
+        col3.metric("NIFTY 500 Recovery (Months)", n500_months)
 # -------------------------------------------------
 # TAB 3 — Monte Carlo (Optimized)
 # -------------------------------------------------
