@@ -5,7 +5,7 @@ import requests
 import uuid
 
 # -------------------------------------------------
-# Page Setup (Consistent Naming)
+# Page Setup
 # -------------------------------------------------
 
 st.set_page_config(
@@ -119,13 +119,15 @@ def generate_plan(mode):
 
         rows.append({
             "Drawdown (%)": -levels[i],
-            "Equity Value (₹)": equity,
-            "Equity Allocation (%)": (equity/total_portfolio)*100
+            "Equity Value (₹)": round(equity, 2),
+            "Equity Allocation (%)": round((equity/total_portfolio)*100, 2)
         })
 
     return pd.DataFrame(rows)
 
-df = generate_plan(deployment_mode) if deployable > 0 else None
+# Precompute both modes (lightweight)
+df_equal = generate_plan("Equal Allocation") if deployable > 0 else None
+df_aggressive = generate_plan("Progressively Aggressive") if deployable > 0 else None
 
 # -------------------------------------------------
 # Tabs
@@ -139,7 +141,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # -------------------------------------------------
-# TAB 1 — Deployment
+# TAB 1 — Deployment + Comparison
 # -------------------------------------------------
 
 with tab1:
@@ -147,13 +149,40 @@ with tab1:
     if deployable <= 0:
         st.warning("No deployable capital.")
     else:
-        st.subheader("Deployment Plan")
-        st.dataframe(df, use_container_width=True)
 
-        st.subheader("Equity Allocation Curve")
-        st.line_chart(
-            df.set_index("Drawdown (%)")[["Equity Allocation (%)"]]
-        )
+        compare_modes = st.checkbox("Compare Both Deployment Modes")
+
+        if compare_modes:
+
+            st.subheader("Equal Allocation")
+            st.dataframe(df_equal, use_container_width=True)
+
+            st.subheader("Progressively Aggressive")
+            st.dataframe(df_aggressive, use_container_width=True)
+
+            st.subheader("Equity Allocation Comparison")
+
+            chart_df = pd.DataFrame({
+                "Equal Allocation": df_equal["Equity Allocation (%)"].values,
+                "Progressively Aggressive": df_aggressive["Equity Allocation (%)"].values
+            }, index=df_equal["Drawdown (%)"])
+
+            st.line_chart(chart_df)
+
+        else:
+
+            if deployment_mode == "Equal Allocation":
+                df_display = df_equal
+            else:
+                df_display = df_aggressive
+
+            st.subheader("Deployment Plan")
+            st.dataframe(df_display, use_container_width=True)
+
+            st.subheader("Equity Allocation Curve")
+            st.line_chart(
+                df_display.set_index("Drawdown (%)")[["Equity Allocation (%)"]]
+            )
 
 # -------------------------------------------------
 # TAB 2 — Crash Replay
@@ -178,7 +207,7 @@ with tab2:
             crash_depth = 35
             recovery_months = 12
 
-        peak = df.iloc[-1]["Equity Value (₹)"]
+        peak = df_aggressive.iloc[-1]["Equity Value (₹)"]
         crash_value = peak * (1 - crash_depth/100)
 
         monthly_recovery = (peak/crash_value)**(1/recovery_months) - 1
@@ -221,7 +250,7 @@ with tab3:
 
         if st.button("Run Simulation"):
 
-            start_value = df.iloc[-1]["Equity Value (₹)"]
+            start_value = df_aggressive.iloc[-1]["Equity Value (₹)"]
 
             growth = run_monte_carlo(
                 start_value,
@@ -238,7 +267,6 @@ with tab3:
             col2.metric("5th Percentile", f"₹{np.percentile(final_vals,5):,.0f}")
             col3.metric("95th Percentile", f"₹{np.percentile(final_vals,95):,.0f}")
 
-            # Plot only percentile paths
             median_path = np.median(growth, axis=0)
             p5_path = np.percentile(growth, 5, axis=0)
             p95_path = np.percentile(growth, 95, axis=0)
