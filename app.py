@@ -13,14 +13,15 @@ st.set_page_config(
 )
 
 # -------------------------------------------------
-# Server-Side Google Analytics Tracking (Debug Mode)
+# Server-Side Google Analytics Tracking
 # -------------------------------------------------
 
-GA_MEASUREMENT_ID = st.secrets["GA_MEASUREMENT_ID"]
-GA_API_SECRET = st.secrets["GA_API_SECRET"]
+GA_MEASUREMENT_ID = st.secrets.get("GA_MEASUREMENT_ID")
+GA_API_SECRET = st.secrets.get("GA_API_SECRET")
 
 def send_ga_event():
     client_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
 
     url = (
         f"https://www.google-analytics.com/mp/collect"
@@ -32,18 +33,32 @@ def send_ga_event():
         "client_id": client_id,
         "events": [
             {
-                "name": "page_view"
+                "name": "session_start",
+                "params": {
+                    "session_id": session_id
+                }
+            },
+            {
+                "name": "page_view",
+                "params": {
+                    "session_id": session_id,
+                    "engagement_time_msec": 100
+                }
             }
         ]
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=5)
-        st.write("GA status code:", response.status_code)
-    except Exception as e:
-        st.write("GA error:", e)
+        requests.post(url, json=payload, timeout=2)
+    except:
+        pass
 
-send_ga_event()
+
+# Fire once per session
+if GA_MEASUREMENT_ID and GA_API_SECRET:
+    if "ga_sent" not in st.session_state:
+        send_ga_event()
+        st.session_state.ga_sent = True
 
 # -------------------------------------------------
 # Title
