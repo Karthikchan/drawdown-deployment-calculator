@@ -157,6 +157,10 @@ with tab1:
 # TAB 2 — Crash Replay with NIFTY Comparison
 # -------------------------------------------------
 
+# -------------------------------------------------
+# TAB 2 — Dynamic Crash Replay with Index Comparison
+# -------------------------------------------------
+
 with tab2:
 
     st.subheader("Crash Replay Comparison")
@@ -168,43 +172,79 @@ with tab2:
 
     if deployable > 0:
 
-        # Crash parameters
+        # Crash depth assumptions
         if crash_type.startswith("2008"):
-            crash_drop = 0.55
+            pf_drop = 0.55
+            n50_drop = 0.50
+            n500_drop = 0.55
         else:
-            crash_drop = 0.35
+            pf_drop = 0.35
+            n50_drop = 0.38
+            n500_drop = 0.42
 
-        # Monthly growth assumption (long-term expected return)
-        annual_return = 0.12
-        monthly_return = (1 + annual_return) ** (1/12) - 1
+        # Annual return assumptions
+        pf_annual_return = 0.12
+        n50_annual_return = 0.13
+        n500_annual_return = 0.14
 
-        # Use selected deployment mode
-        df_mode = df
+        pf_monthly = (1 + pf_annual_return) ** (1/12) - 1
+        n50_monthly = (1 + n50_annual_return) ** (1/12) - 1
+        n500_monthly = (1 + n500_annual_return) ** (1/12) - 1
 
-        peak_equity = df_mode.iloc[-1]["Equity Value (₹)"]
-        peak_total = peak_equity + (total_portfolio - peak_equity)
-
-        # Split equity + cash
+        # Portfolio peak after deployment
+        peak_equity = df.iloc[-1]["Equity Value (₹)"]
         cash_component = total_portfolio - peak_equity
-        equity_after_crash = peak_equity * (1 - crash_drop)
+        peak_total = peak_equity + cash_component
 
-        portfolio_value = equity_after_crash + cash_component
+        # Crash impact
+        pf_equity_after = peak_equity * (1 - pf_drop)
+        pf_total_after = pf_equity_after + cash_component
 
-        values = [portfolio_value]
-        months = 0
+        n50_after = peak_total * (1 - n50_drop)
+        n500_after = peak_total * (1 - n500_drop)
 
-        # Grow until prior peak recovered
-        while portfolio_value < total_portfolio and months < 120:
-            equity_after_crash *= (1 + monthly_return)
-            portfolio_value = equity_after_crash + cash_component
-            values.append(portfolio_value)
-            months += 1
+        pf_values = [pf_total_after]
+        n50_values = [n50_after]
+        n500_values = [n500_after]
 
-        crash_df = pd.DataFrame({"Portfolio": values})
+        pf_months = 0
+        n50_months = 0
+        n500_months = 0
+
+        # Simulate month by month until recovery
+        for month in range(1, 121):
+
+            # Portfolio recovery (equity only grows)
+            pf_equity_after *= (1 + pf_monthly)
+            pf_total = pf_equity_after + cash_component
+            pf_values.append(pf_total)
+            if pf_months == 0 and pf_total >= peak_total:
+                pf_months = month
+
+            # NIFTY 50 recovery
+            n50_after *= (1 + n50_monthly)
+            n50_values.append(n50_after)
+            if n50_months == 0 and n50_after >= peak_total:
+                n50_months = month
+
+            # NIFTY 500 recovery
+            n500_after *= (1 + n500_monthly)
+            n500_values.append(n500_after)
+            if n500_months == 0 and n500_after >= peak_total:
+                n500_months = month
+
+        crash_df = pd.DataFrame({
+            "Portfolio": pf_values,
+            "NIFTY 50": n50_values,
+            "NIFTY 500": n500_values
+        })
+
         st.line_chart(crash_df)
 
-        st.metric("Portfolio Recovery (Months)", months)
-
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Portfolio Recovery (Months)", pf_months)
+        col2.metric("NIFTY 50 Recovery (Months)", n50_months)
+        col3.metric("NIFTY 500 Recovery (Months)", n500_months)
 # -------------------------------------------------
 # TAB 3 — Monte Carlo (Optimized)
 # -------------------------------------------------
