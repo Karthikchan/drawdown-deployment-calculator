@@ -13,10 +13,10 @@ st.set_page_config(
 )
 
 # -------------------------------------------------
-# Server-Side Google Analytics Tracking
+# Server-Side Google Analytics Tracking (Debug Mode)
 # -------------------------------------------------
 
-GA_MEASUREMENT_ID = "G-2NC6JTLL3R"
+GA_MEASUREMENT_ID = st.secrets["GA_MEASUREMENT_ID"]
 GA_API_SECRET = st.secrets["GA_API_SECRET"]
 
 def send_ga_event():
@@ -38,13 +38,12 @@ def send_ga_event():
     }
 
     try:
-        requests.post(url, json=payload, timeout=2)
-    except:
-        pass
+        response = requests.post(url, json=payload, timeout=5)
+        st.write("GA status code:", response.status_code)
+    except Exception as e:
+        st.write("GA error:", e)
 
-# Fire page view event
 send_ga_event()
-st.write("GA event sent")
 
 # -------------------------------------------------
 # Title
@@ -102,7 +101,7 @@ levels = [float(x.strip()) for x in drawdown_levels.split(",") if x.strip() != "
 num_stages = len(levels)
 
 # -------------------------------------------------
-# Validation & Deployment Logic
+# Deployment Logic
 # -------------------------------------------------
 
 if cash_available <= 0:
@@ -155,10 +154,7 @@ else:
 
         df = pd.DataFrame(deployment_plan)
 
-        # -------------------------------------------------
-        # Output Section
-        # -------------------------------------------------
-
+        # Output
         st.subheader("Deployment Plan")
         st.dataframe(df, use_container_width=True)
 
