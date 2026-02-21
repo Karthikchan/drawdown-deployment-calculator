@@ -22,7 +22,6 @@ except StreamlitSecretNotFoundError:
     GA_MEASUREMENT_ID = None
     GA_API_SECRET = None
 
-
 def send_ga_event():
     client_id = str(uuid.uuid4())
     url = (
@@ -102,6 +101,14 @@ deployment_mode = st.sidebar.selectbox(
     "Deployment Mode", ["Equal Allocation", "Progressively Aggressive"]
 )
 
+monthly_contribution = st.sidebar.number_input(
+    "Monthly Contribution (₹)", 0.0, 1e9, 0.0, step=1000.0
+)
+
+monthly_withdrawal = st.sidebar.number_input(
+    "Monthly Withdrawal (₹)", 0.0, 1e9, 0.0, step=1000.0
+)
+
 # -------------------------------------------------
 # Validation
 # -------------------------------------------------
@@ -166,33 +173,39 @@ def generate_plan(mode):
 
     return pd.DataFrame(rows)
 
-
-def crash_equity_and_cash_at_bottom(mode, crash_drop):
+def crash_equity_and_cash_at_bottom(
+    mode,
+    crash_drop,
+    initial_equity,
+    deployable_capital,
+    available_cash
+):
     n = len(levels)
-    weights = get_weights(mode, n)
+    weights = [1] * n if mode == "Equal Allocation" else list(range(1, n + 1))
     total_weight = sum(weights)
 
-    crash_equity_value = current_equity * (1 - crash_drop)
-    cash_balance = cash
+    crash_equity_value = initial_equity * (1 - crash_drop)
+    cash_balance = available_cash
 
     for i in range(n):
         trigger_drop = levels[i] / 100
 
+        # Deploy only if the crash actually reaches this drawdown level.
         if trigger_drop > crash_drop:
             continue
 
-        planned = deployable * (weights[i] / total_weight)
+        planned = deployable_capital * (weights[i] / total_weight)
         planned = min(planned, cash_balance)
 
         if planned <= 0:
             continue
 
+        # Tranche bought at trigger_drop and marked to crash bottom.
         tranche_to_bottom_factor = (1 - crash_drop) / (1 - trigger_drop)
         crash_equity_value += planned * tranche_to_bottom_factor
         cash_balance -= planned
 
     return crash_equity_value, cash_balance
-
 
 df = generate_plan(deployment_mode) if deployable > 0 else None
 
@@ -222,21 +235,52 @@ with tab1:
 with tab2:
     st.subheader("Crash Replay Comparison")
 
-    crash_type = st.selectbox("Crash Scenario", ["2008-Style Crash", "2020-Style Crash"])
+    crash_type = st.selectbox(
+        "Crash Scenario",
+        ["2008-Style Crash", "2020-Style Crash", "Custom"]
+    )
 
     if deployable > 0:
-        if crash_type.startswith("2008"):
-            pf_drop, n50_drop, n500_drop = 0.55, 0.50, 0.55
-        else:
-            pf_drop, n50_drop, n500_drop = 0.35, 0.38, 0.42
 
-        pf_annual, n50_annual, n500_annual = 0.12, 0.13, 0.14
-        pf_monthly = (1 + pf_annual) ** (1 / 12) - 1
-        n50_monthly = (1 + n50_annual) ** (1 / 12) - 1
-        n500_monthly = (1 + n500_annual) ** (1 / 12) - 1
+        # Crash depths and return assumptions
+        if crash_type.startswith("2008"):
+            pf_drop = 0.55
+            n50_drop = 0.50
+            n500_drop = 0.55
+            pf_annual = 0.12
+            n50_annual = 0.13
+            n500_annual = 0.14
+        elif crash_type.startswith("2020"):
+            pf_drop = 0.35
+            n50_drop = 0.38
+            n500_drop = 0.42
+            pf_annual = 0.12
+            n50_annual = 0.13
+            n500_annual = 0.14
+        else:
+            st.caption("Tune a custom crash and recovery profile.")
+            pf_drop = st.slider("Portfolio Crash Depth (%)", 5, 70, 40) / 100
+            n50_drop = st.slider("NIFTY 50 Crash Depth (%)", 5, 70, 38) / 100
+            n500_drop = st.slider("NIFTY 500 Crash Depth (%)", 5, 70, 42) / 100
+            pf_annual = st.slider("Portfolio Annual Recovery Return (%)", 1, 25, 12) / 100
+            n50_annual = st.slider("NIFTY 50 Annual Recovery Return (%)", 1, 25, 13) / 100
+            n500_annual = st.slider("NIFTY 500 Annual Recovery Return (%)", 1, 25, 14) / 100
+
+        pf_monthly = (1 + pf_annual) ** (1/12) - 1
+        n50_monthly = (1 + n50_annual) ** (1/12) - 1
+        n500_monthly = (1 + n500_annual) ** (1/12) - 1
+        net_monthly_flow = monthly_contribution - monthly_withdrawal
 
         pre_crash_total = total_portfolio
-        pf_equity, cash_before = crash_equity_and_cash_at_bottom(deployment_mode, pf_drop)
+
+        # Portfolio value at crash bottom after staged deployments.
+        pf_equity, cash_before = crash_equity_and_cash_at_bottom(
+            deployment_mode,
+            pf_drop,
+            current_equity,
+            deployable,
+            cash
+        )
         pf_total = pf_equity + cash_before
 
         n50_value = pre_crash_total * (1 - n50_drop)
@@ -251,18 +295,25 @@ with tab2:
         n500_months = 0
 
         for month in range(1, 181):
+
+            # Portfolio recovery (equity grows, then net cashflow is invested/withdrawn)
             pf_equity *= (1 + pf_monthly)
+            pf_equity = max(pf_equity + net_monthly_flow, 0)
             pf_total = pf_equity + cash_before
             pf_path.append(pf_total)
             if pf_months == 0 and pf_total >= pre_crash_total:
                 pf_months = month
 
+            # NIFTY 50 recovery (benchmark remains contribution-neutral)
             n50_value *= (1 + n50_monthly)
+            n50_value = max(n50_value + net_monthly_flow, 0)
             n50_path.append(n50_value)
             if n50_months == 0 and n50_value >= pre_crash_total:
                 n50_months = month
 
+            # NIFTY 500 recovery (benchmark remains contribution-neutral)
             n500_value *= (1 + n500_monthly)
+            n500_value = max(n500_value + net_monthly_flow, 0)
             n500_path.append(n500_value)
             if n500_months == 0 and n500_value >= pre_crash_total:
                 n500_months = month
@@ -270,12 +321,68 @@ with tab2:
         crash_df = pd.DataFrame({"Portfolio": pf_path, "NIFTY 50": n50_path, "NIFTY 500": n500_path})
         st.line_chart(crash_df)
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Portfolio Recovery (Months)", pf_months)
-        c2.metric("NIFTY 50 Recovery (Months)", n50_months)
-        c3.metric("NIFTY 500 Recovery (Months)", n500_months)
-    else:
-        st.info("Crash Replay requires deployable capital under the selected equity cap.")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Portfolio Recovery (Months)", pf_months)
+        col2.metric("NIFTY 50 Recovery (Months)", n50_months)
+        col3.metric("NIFTY 500 Recovery (Months)", n500_months)
+
+        flow_label = f"₹{net_monthly_flow:,.0f}"
+        st.caption(f"Monthly net cashflow applied in recovery paths: {flow_label}")
+# -------------------------------------------------
+# TAB 3 — Monte Carlo (Optimized)
+# -------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def run_monte_carlo(start_value, simulations, years, exp_return, volatility):
+    returns = np.random.normal(
+        exp_return/100,
+        volatility/100,
+        (simulations, years)
+    )
+    growth = start_value * np.cumprod(1+returns, axis=1)
+    return growth
+
+with tab3:
+
+    run_mc = st.checkbox("Enable Monte Carlo Simulation")
+
+    if run_mc and deployable > 0:
+
+        simulations = st.slider("Simulations", 500, 5000, 1000)
+        exp_return = st.slider("Expected Return (%)", 5, 20, 12)
+        volatility = st.slider("Volatility (%)", 5, 40, 18)
+        years = st.slider("Projection Years", 1, 15, 5)
+
+        if st.button("Run Simulation"):
+
+            start_value = df.iloc[-1]["Equity Value (₹)"]
+
+            growth = run_monte_carlo(
+                start_value,
+                simulations,
+                years,
+                exp_return,
+                volatility
+            )
+
+            final_vals = growth[:, -1]
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Median Final Value", f"₹{np.median(final_vals):,.0f}")
+            col2.metric("5th Percentile", f"₹{np.percentile(final_vals,5):,.0f}")
+            col3.metric("95th Percentile", f"₹{np.percentile(final_vals,95):,.0f}")
+
+            median_path = np.median(growth, axis=0)
+            p5_path = np.percentile(growth, 5, axis=0)
+            p95_path = np.percentile(growth, 95, axis=0)
+
+            mc_plot = pd.DataFrame({
+                "Median": median_path,
+                "5th %ile": p5_path,
+                "95th %ile": p95_path
+            })
+
+            st.line_chart(mc_plot)
 
 # -------------------------------------------------
 # TAB 3
