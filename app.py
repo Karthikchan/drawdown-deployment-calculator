@@ -125,9 +125,7 @@ def generate_plan(mode):
 
     return pd.DataFrame(rows)
 
-# Precompute both modes (lightweight)
-df_equal = generate_plan("Equal Allocation") if deployable > 0 else None
-df_aggressive = generate_plan("Progressively Aggressive") if deployable > 0 else None
+df = generate_plan(deployment_mode) if deployable > 0 else None
 
 # -------------------------------------------------
 # Tabs
@@ -141,7 +139,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # -------------------------------------------------
-# TAB 1 — Deployment + Comparison
+# TAB 1
 # -------------------------------------------------
 
 with tab1:
@@ -149,82 +147,76 @@ with tab1:
     if deployable <= 0:
         st.warning("No deployable capital.")
     else:
+        st.subheader("Deployment Plan")
+        st.dataframe(df, use_container_width=True)
 
-        compare_modes = st.checkbox("Compare Both Deployment Modes")
-
-        if compare_modes:
-
-            st.subheader("Equal Allocation")
-            st.dataframe(df_equal, use_container_width=True)
-
-            st.subheader("Progressively Aggressive")
-            st.dataframe(df_aggressive, use_container_width=True)
-
-            st.subheader("Equity Allocation Comparison")
-
-            chart_df = pd.DataFrame({
-                "Equal Allocation": df_equal["Equity Allocation (%)"].values,
-                "Progressively Aggressive": df_aggressive["Equity Allocation (%)"].values
-            }, index=df_equal["Drawdown (%)"])
-
-            st.line_chart(chart_df)
-
-        else:
-
-            if deployment_mode == "Equal Allocation":
-                df_display = df_equal
-            else:
-                df_display = df_aggressive
-
-            st.subheader("Deployment Plan")
-            st.dataframe(df_display, use_container_width=True)
-
-            st.subheader("Equity Allocation Curve")
-            st.line_chart(
-                df_display.set_index("Drawdown (%)")[["Equity Allocation (%)"]]
-            )
+        st.subheader("Equity Allocation Curve")
+        st.line_chart(df.set_index("Drawdown (%)")[["Equity Allocation (%)"]])
 
 # -------------------------------------------------
-# TAB 2 — Crash Replay
+# TAB 2 — Crash Replay with NIFTY Comparison
 # -------------------------------------------------
 
 with tab2:
 
+    st.subheader("Crash Replay Comparison")
+
     crash_type = st.selectbox(
-        "Crash Type",
-        [
-            "2008-Style (Deep, Slow Recovery)",
-            "2020-Style (Sharp, Fast Recovery)"
-        ]
+        "Crash Scenario",
+        ["2008-Style Crash", "2020-Style Crash"]
     )
 
     if deployable > 0:
 
         if crash_type.startswith("2008"):
-            crash_depth = 55
-            recovery_months = 36
+            portfolio_drop = 55
+            portfolio_recovery = 36
+            nifty50_drop = 50
+            nifty50_recovery = 30
+            nifty500_drop = 55
+            nifty500_recovery = 34
         else:
-            crash_depth = 35
-            recovery_months = 12
+            portfolio_drop = 35
+            portfolio_recovery = 12
+            nifty50_drop = 38
+            nifty50_recovery = 8
+            nifty500_drop = 42
+            nifty500_recovery = 10
 
-        peak = df_aggressive.iloc[-1]["Equity Value (₹)"]
-        crash_value = peak * (1 - crash_depth/100)
+        peak = df.iloc[-1]["Equity Value (₹)"]
 
-        monthly_recovery = (peak/crash_value)**(1/recovery_months) - 1
+        def simulate(drop, recovery_months):
+            crash_val = peak * (1 - drop/100)
+            monthly = (peak/crash_val)**(1/recovery_months) - 1
+            values = [crash_val]
+            for _ in range(recovery_months):
+                values.append(values[-1]*(1+monthly))
+            return values
 
-        values = [crash_value]
-        for _ in range(recovery_months):
-            values.append(values[-1]*(1+monthly_recovery))
+        portfolio_path = simulate(portfolio_drop, portfolio_recovery)
+        nifty50_path = simulate(nifty50_drop, nifty50_recovery)
+        nifty500_path = simulate(nifty500_drop, nifty500_recovery)
+
+        max_len = max(len(portfolio_path), len(nifty50_path), len(nifty500_path))
+
+        def pad(lst):
+            return lst + [lst[-1]]*(max_len - len(lst))
 
         crash_df = pd.DataFrame({
-            "Portfolio Value": values
+            "Portfolio": pad(portfolio_path),
+            "NIFTY 50": pad(nifty50_path),
+            "NIFTY 500": pad(nifty500_path)
         })
 
         st.line_chart(crash_df)
-        st.metric("Months to Recover Peak", recovery_months)
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Portfolio Recovery (Months)", portfolio_recovery)
+        col2.metric("NIFTY 50 Recovery (Months)", nifty50_recovery)
+        col3.metric("NIFTY 500 Recovery (Months)", nifty500_recovery)
 
 # -------------------------------------------------
-# TAB 3 — Optimized Monte Carlo
+# TAB 3 — Monte Carlo (Optimized)
 # -------------------------------------------------
 
 @st.cache_data(show_spinner=False)
@@ -250,7 +242,7 @@ with tab3:
 
         if st.button("Run Simulation"):
 
-            start_value = df_aggressive.iloc[-1]["Equity Value (₹)"]
+            start_value = df.iloc[-1]["Equity Value (₹)"]
 
             growth = run_monte_carlo(
                 start_value,
@@ -280,7 +272,7 @@ with tab3:
             st.line_chart(mc_plot)
 
 # -------------------------------------------------
-# TAB 4 — Risk Diagnostics
+# TAB 4
 # -------------------------------------------------
 
 with tab4:
